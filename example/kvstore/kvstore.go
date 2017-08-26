@@ -14,12 +14,14 @@ import (
 	"os/exec"
 	"os"
 	"io/ioutil"
+	"time"
 )
 
 type StorageApplication struct {
 	types.BaseApplication
 
-	state merkle.Tree
+	state merkle.Tree//存储 address-ipfs
+	projects map[string]merkle.Tree // 存储address-project
 }
 // Transaction type bytes
 const (
@@ -28,14 +30,16 @@ const (
 )
 func NewStorageApplication() *StorageApplication {
 	state := iavl.NewIAVLTree(0, nil)
-	return &StorageApplication{state: state}
+	projects := make(map[string]merkle.Tree)
+	return &StorageApplication{state: state,projects:projects}
 }
 
 func (app *StorageApplication) Info() (resInfo types.ResponseInfo) {
 	return types.ResponseInfo{Data: cmn.Fmt("{\"size\":%v}", app.state.Size())}
 }
 
-// tx is either "key=value" or just arbitrary bytes
+// tx is either "0x01|len(len(key))|len(key)|key|len(len(value))|len(value)|value"
+//or "0x02|len(len(key))|len(key)|key|len(len(value))|len(value)|value"
 func (app *StorageApplication) DeliverTx(tx []byte) types.Result {
 	//parts := strings.Split(string(tx), "=")
 	//if len(parts) == 2 {
@@ -121,10 +125,107 @@ func (app *StorageApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
 	return types.OK
 }
 
+//判断是否有重复申请
+func (app *StorageApplication) filterTx(tree merkle.Tree, projects map[string]merkle.Tree,tx []byte) types.Result {
+	if len(tx) == 0 {
+		return types.ErrEncodingError.SetLog("Tx length cannot be zero")
+	}
+	typeByte := tx[0]
+	tx = tx[1:]
+	switch typeByte {
+	case WriteSet: // Set
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+		value, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
+		}
+		tx = tx[n:]
+		if len(tx) != 0 {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		tree.Set(key, value)
+
+	case WriteRem: // Compare 比较申请人是否符合要求
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+		value, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
+		}
+		tx = tx[n:]
+		if len(tx) != 0 {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		//判断是否重复申请
+		// 查找键值是否存在
+		if v, ok := projects[string(key)]; ok {
+			//存在申请历史，需要比对是否重复申请
+			fmt.Println("browsing history")
+			project := v
+			_, creation, exists := project.Get(value)
+			if exists {
+				fmt.Println("Applied before")
+				return types.ErrEncodingError.SetLog(cmn.Fmt("Applied before @",creation))
+			} else{
+				//不存在申请历史，插入信息
+				fmt.Println("Applied now")
+				now := time.Now()
+
+				project.Set(value,[]byte(now.String()))
+
+			}
+		} else {
+			//不存在申请历史，插入信息
+			fmt.Println("Key Not Found")
+			newTree := iavl.NewIAVLTree(0, nil)
+			now := time.Now()
+			newTree.Set(value,[]byte(now.String()))
+			projects[string(key)] = newTree
+
+
+		}
+
+		//获得IPFS地址
+		_, stuValue, stuExists := app.state.Get(value)
+		_, pojValue, pojExists := app.state.Get(key)
+
+		//判断两个地址都存存在
+		if stuExists && pojExists{
+			matched := Compare(string(stuValue),string(pojValue))
+			if matched {
+				fmt.Println("matched")
+				return types.NewResultOK([]byte("Matched"),"log")
+			}else{
+				fmt.Println("not matched")
+				return types.OK
+			}
+		} else {
+			return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Account %X", key))
+
+		}
+
+
+	default:
+		return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
+	}
+	return types.OK
+}
+
 func (app *StorageApplication) CheckTx(tx []byte) types.Result {
 	//return types.OK
 	tree := app.state
-	return app.doTx(tree, tx)
+	history := app.projects
+
+	return app.filterTx(tree,history, tx)
 }
 
 func (app *StorageApplication) Commit() types.Result {
