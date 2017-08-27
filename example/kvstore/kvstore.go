@@ -15,6 +15,7 @@ import (
 	"os"
 	"io/ioutil"
 	"time"
+	//"strconv"
 )
 
 type StorageApplication struct {
@@ -27,6 +28,11 @@ type StorageApplication struct {
 const (
 	WriteSet byte = 0x01
 	WriteRem byte = 0x02
+)
+
+const (
+	PathDoc string = "/Users/b/Documents/"
+	//PathProject string = ""
 )
 func NewStorageApplication() *StorageApplication {
 	state := iavl.NewIAVLTree(0, nil)
@@ -49,84 +55,12 @@ func (app *StorageApplication) DeliverTx(tx []byte) types.Result {
 	//}
 	//return types.OK
 	tree := app.state
-	return app.doTx(tree, tx)
+
+	history := app.projects
+
+	return app.doTx(tree,history, tx)
 }
-func (app *StorageApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
-	if len(tx) == 0 {
-		return types.ErrEncodingError.SetLog("Tx length cannot be zero")
-	}
-	typeByte := tx[0]
-	tx = tx[1:]
-	switch typeByte {
-	case WriteSet: // Set
-		key, n, err := wire.GetByteSlice(tx)
-		if err != nil {
-			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
-		}
-		tx = tx[n:]
-		value, n, err := wire.GetByteSlice(tx)
-		if err != nil {
-			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
-		}
-		tx = tx[n:]
-		if len(tx) != 0 {
-			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
-		}
-
-		tree.Set(key, value)
-	//case WriteRem: // Remove
-	//	key, n, err := wire.GetByteSlice(tx)
-	//	if err != nil {
-	//		return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
-	//	}
-	//	tx = tx[n:]
-	//	if len(tx) != 0 {
-	//		return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
-	//	}
-	//	tree.Remove(key)
-	case WriteRem: // Compare
-		key, n, err := wire.GetByteSlice(tx)
-		if err != nil {
-			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
-		}
-		tx = tx[n:]
-		value, n, err := wire.GetByteSlice(tx)
-		if err != nil {
-			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
-		}
-		tx = tx[n:]
-		if len(tx) != 0 {
-			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
-		}
-
-		//获得IPFS地址
-		_, stuValue, stuExists := app.state.Get(value)
-		_, pojValue, pojExists := app.state.Get(key)
-
-		//判断两个地址都存存在
-		if stuExists && pojExists{
-			matched := Compare(string(stuValue),string(pojValue))
-			if matched {
-				fmt.Println("matched")
-				return types.NewResultOK([]byte("Matched"),"log")
-			}else{
-				fmt.Println("not matched")
-				return types.OK
-			}
-		} else {
-			return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Account %X", key))
-
-		}
-
-
-	default:
-		return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
-	}
-	return types.OK
-}
-
-//判断是否有重复申请
-func (app *StorageApplication) filterTx(tree merkle.Tree, projects map[string]merkle.Tree,tx []byte) types.Result {
+func (app *StorageApplication) doTx(tree merkle.Tree,projects map[string]merkle.Tree, tx []byte) types.Result {
 	if len(tx) == 0 {
 		return types.ErrEncodingError.SetLog("Tx length cannot be zero")
 	}
@@ -220,6 +154,79 @@ func (app *StorageApplication) filterTx(tree merkle.Tree, projects map[string]me
 	return types.OK
 }
 
+//判断是否有重复申请
+func (app *StorageApplication) filterTx(tree merkle.Tree, projects map[string]merkle.Tree,tx []byte) types.Result {
+	if len(tx) == 0 {
+		return types.ErrEncodingError.SetLog("Tx length cannot be zero")
+	}
+	typeByte := tx[0]
+	tx = tx[1:]
+	switch typeByte {
+	case WriteSet: // Set
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+		value, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
+		}
+		tx = tx[n:]
+		if len(tx) != 0 {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		tree.Set(key, value)
+
+	case WriteRem: // Compare 比较申请人是否符合要求
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+		value, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
+		}
+		tx = tx[n:]
+		if len(tx) != 0 {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		//判断是否重复申请
+		// 查找键值是否存在
+		if v, ok := projects[string(key)]; ok {
+			//存在申请历史，需要比对是否重复申请
+			fmt.Println("browsing history")
+			project := v
+			_, creation, exists := project.Get(value)
+			if exists {
+				fmt.Println("Applied before")
+				return types.ErrEncodingError.SetLog(cmn.Fmt("Applied before @",creation))
+			}
+		}
+
+		//获得IPFS地址
+		_, _, stuExists := app.state.Get(value)
+		_, _, pojExists := app.state.Get(key)
+
+		//判断两个地址都存存在
+		if stuExists && pojExists{
+
+			return types.NewResultOK([]byte("Ready to compare documents "),"log")
+		} else {
+			return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Account %X", key))
+
+		}
+
+
+	default:
+		return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
+	}
+	return types.OK
+}
+
 func (app *StorageApplication) CheckTx(tx []byte) types.Result {
 	//return types.OK
 	tree := app.state
@@ -229,6 +236,9 @@ func (app *StorageApplication) CheckTx(tx []byte) types.Result {
 }
 
 func (app *StorageApplication) Commit() types.Result {
+	//hash := app.state.Hash()
+	//hashProject := strconv.Itoa(len(app.projects))
+	//return types.NewResultOK(hash,hashProject)
 	hash := app.state.Hash()
 	return types.NewResultOK(hash, "")
 }
@@ -318,11 +328,11 @@ func compareFiles(criteria string, target string) bool{
 
 func Compare(studentAdd string,projectAdd string) bool{
 
-	ipfsDownload(studentAdd,"/Users/b/Documents/")
-	ipfsDownload(projectAdd,"/Users/b/Documents/")
+	ipfsDownload(studentAdd,PathDoc)
+	ipfsDownload(projectAdd,PathDoc)
 
-	filepath2 := "/Users/b/Documents/"+studentAdd
-	filepath := "/Users/b/Documents/"+projectAdd
+	filepath2 := PathDoc+studentAdd
+	filepath := PathDoc+projectAdd
 
 	result := compareFiles(filepath,filepath2)
 	fmt.Println("get result", result)
@@ -343,14 +353,31 @@ func (app *StorageApplication) Query(reqQuery types.RequestQuery) (resQuery type
 		}
 		return
 	} else {
-		index, value, exists := app.state.Get(reqQuery.Data)
-		resQuery.Index = int64(index)
-		resQuery.Value = value
-		if exists {
-			resQuery.Log = "exists"
-		} else {
-			resQuery.Log = "does not exist"
+		switch reqQuery.Path {
+		case "tree":
+			index, value, exists := app.state.Get(reqQuery.Data)
+			resQuery.Index = int64(index)
+			resQuery.Value = value
+			if exists {
+				resQuery.Log = "exists"
+			} else {
+				resQuery.Log = "does not exist"
+			}
+
+		case "projects":
+			index, value, exists := app.state.Get(reqQuery.Data)
+			resQuery.Index = int64(index)
+			resQuery.Value = value
+			if exists {
+				resQuery.Log = "exists"
+			} else {
+				resQuery.Log = "does not exist"
+			}
+
+		default:
+			return types.ResponseQuery{Log: cmn.Fmt("Invalid query path. Expected hash or tx, got %v", reqQuery.Path)}
 		}
 		return
 	}
+
 }
