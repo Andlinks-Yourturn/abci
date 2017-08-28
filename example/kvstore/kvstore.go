@@ -8,22 +8,30 @@ import (
 	cmn "github.com/tendermint/tmlibs/common"
 	"github.com/tendermint/tmlibs/merkle"
 	"github.com/tendermint/go-wire"
+	"net/http"
 	"github.com/bitly/go-simplejson"
-
 	"fmt"
 	"os/exec"
 	"os"
 	"io/ioutil"
 	"time"
-	//"strconv"
+	"strconv"
 )
 
 type StorageApplication struct {
 	types.BaseApplication
 
 	state merkle.Tree//存储 address-ipfs
-	projects map[string]merkle.Tree // 存储address-project
+	projects map[string]merkle.Tree // 存储address-project 记录每个项目的申请状况
+	sendlist []transaction
 }
+
+type transaction struct {
+	Input    string
+	Output     string
+	Amount   int
+}
+
 // Transaction type bytes
 const (
 	WriteSet byte = 0x01
@@ -32,12 +40,13 @@ const (
 
 const (
 	PathDoc string = "/Users/b/Documents/"
-	//PathProject string = ""
+	url string ="http://localhost:46600"
 )
 func NewStorageApplication() *StorageApplication {
 	state := iavl.NewIAVLTree(0, nil)
 	projects := make(map[string]merkle.Tree)
-	return &StorageApplication{state: state,projects:projects}
+	sendlist := []transaction{}
+	return &StorageApplication{state: state,projects:projects,sendlist:sendlist}
 }
 
 func (app *StorageApplication) Info() (resInfo types.ResponseInfo) {
@@ -58,9 +67,10 @@ func (app *StorageApplication) DeliverTx(tx []byte) types.Result {
 
 	history := app.projects
 
-	return app.doTx(tree,history, tx)
+	sendlist := app.sendlist
+	return app.doTx(sendlist,tree,history, tx)
 }
-func (app *StorageApplication) doTx(tree merkle.Tree,projects map[string]merkle.Tree, tx []byte) types.Result {
+func (app *StorageApplication) doTx(sendlist []transaction,tree merkle.Tree,projects map[string]merkle.Tree, tx []byte) types.Result {
 	if len(tx) == 0 {
 		return types.ErrEncodingError.SetLog("Tx length cannot be zero")
 	}
@@ -138,7 +148,19 @@ func (app *StorageApplication) doTx(tree merkle.Tree,projects map[string]merkle.
 			if matched {
 				_,apptime,_ :=app.projects[string(key)].Get(value)
 				fmt.Println("matched",string(apptime))
-				fmt.Println("matched")
+
+				//创建返回对象
+
+				filepath := PathDoc+string(pojValue)
+				sendAmount := getIntItem(string(filepath),"amount")
+				tx := transaction {
+					Input: string(key),
+					Output:string(value),
+					Amount: sendAmount,
+				}
+
+				sendlist = append(sendlist, tx)
+
 				return types.NewResultOK([]byte("Matched"),"log")
 			}else{
 				fmt.Println("not matched")
@@ -238,7 +260,15 @@ func (app *StorageApplication) CheckTx(tx []byte) types.Result {
 
 func (app *StorageApplication) Commit() types.Result {
 
+	//将 sendlist中记录的交易执行
+	for _, elem := range app.sendlist {
+
+		result := sendBasecoinTx(url,elem.Input,elem.Output,elem.Amount)
+		fmt.Println("send result from %s,to %s, with %d, the result is %s",elem.Input,elem.Output,elem.Amount,result)
+	}
+	app.sendlist = nil
 	hash := app.state.Hash()
+	fmt.Println("commit transaction")
 	return types.NewResultOK(hash, "")
 }
 func ipfsDownload(add string,path string) {
@@ -288,6 +318,31 @@ func getStringItem(path string,item string) string{
 	fmt.Println("---",majorStr)
 	return majorStr
 }
+
+//send basecoin transaction to server
+func sendBasecoinTx(url string,from string,to string,amount int) string{
+
+	//http://192.168.1.64:46600/sendTx?userFrom=&password=&money=&userToAddress"
+	request := url+"sendTx?userFrom="+from+"&money="+strconv.Itoa(amount)+"&userToAddress"+to
+	fmt.Println("url, ",request)
+	res, err := http.Get(request)
+	if err != nil{
+		panic(err)
+	}
+	body, err := ioutil.ReadAll(res.Body)
+
+	if string(body) == "true" {
+		fmt.Println("success")
+		return "success"
+	}else{
+		fmt.Println("error")
+		return "failure"
+	}
+
+
+
+}
+
 /*
 比较提交的文件是否与要求匹配
 input: criteria 条件json ；target：申请人条件文件
@@ -370,11 +425,17 @@ func (app *StorageApplication) Query(reqQuery types.RequestQuery) (resQuery type
 			//viewed := []string{}
 			viewed := ""
 
-			tree.Iterate(func(key []byte, value []byte) bool {
-				viewed = viewed+" , "+string(key)
-				return false
-			})
-			resQuery.Value = []byte(viewed)
+			if tree != nil {
+				length := tree.Height()
+				fmt.Println("tree size = ",length)
+				tree.Iterate(func(key []byte, value []byte) bool {
+					viewed = viewed+" , "+string(key)
+					return false
+				})
+				resQuery.Value = []byte(viewed)
+			}else {
+				resQuery.Value = []byte(strconv.Itoa(0))
+			}
 
 
 		default:
