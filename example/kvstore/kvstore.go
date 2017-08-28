@@ -136,6 +136,8 @@ func (app *StorageApplication) doTx(tree merkle.Tree,projects map[string]merkle.
 		if stuExists && pojExists{
 			matched := Compare(string(stuValue),string(pojValue))
 			if matched {
+				_,apptime,_ :=app.projects[string(key)].Get(value)
+				fmt.Println("matched",string(apptime))
 				fmt.Println("matched")
 				return types.NewResultOK([]byte("Matched"),"log")
 			}else{
@@ -213,10 +215,9 @@ func (app *StorageApplication) filterTx(tree merkle.Tree, projects map[string]me
 
 		//判断两个地址都存存在
 		if stuExists && pojExists{
-
 			return types.NewResultOK([]byte("Ready to compare documents "),"log")
 		} else {
-			return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Account %X", key))
+			return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Account %X", key,"and %X", value))
 
 		}
 
@@ -236,9 +237,7 @@ func (app *StorageApplication) CheckTx(tx []byte) types.Result {
 }
 
 func (app *StorageApplication) Commit() types.Result {
-	//hash := app.state.Hash()
-	//hashProject := strconv.Itoa(len(app.projects))
-	//return types.NewResultOK(hash,hashProject)
+
 	hash := app.state.Hash()
 	return types.NewResultOK(hash, "")
 }
@@ -365,14 +364,18 @@ func (app *StorageApplication) Query(reqQuery types.RequestQuery) (resQuery type
 			}
 
 		case "projects":
-			index, value, exists := app.state.Get(reqQuery.Data)
-			resQuery.Index = int64(index)
-			resQuery.Value = value
-			if exists {
-				resQuery.Log = "exists"
-			} else {
-				resQuery.Log = "does not exist"
-			}
+			tree := app.projects[string(reqQuery.Data)]
+
+			//  traversing the whole node works... in order
+			//viewed := []string{}
+			viewed := ""
+
+			tree.Iterate(func(key []byte, value []byte) bool {
+				viewed = viewed+" , "+string(key)
+				return false
+			})
+			resQuery.Value = []byte(viewed)
+
 
 		default:
 			return types.ResponseQuery{Log: cmn.Fmt("Invalid query path. Expected hash or tx, got %v", reqQuery.Path)}
