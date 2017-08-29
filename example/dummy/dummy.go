@@ -115,8 +115,8 @@ func (app *DummyApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
 				filepath := PathDoc+string(pojValue)
 				sendAmount := getIntItem(string(filepath),"amount")
 				//若匹配则发出转账申请
-				toName :="A3AC84A1DB492F2F284BA4CC5DBC933703C7D161"
-				sendBasecoinTx(url,"andlinks",toName,sendAmount)
+				//toName :="A3AC84A1DB492F2F284BA4CC5DBC933703C7D161"
+				sendBasecoinTx(url,"andlinks",string(value),sendAmount)
 				return types.NewResultOK([]byte("Matched"),"log")
 
 			}else{
