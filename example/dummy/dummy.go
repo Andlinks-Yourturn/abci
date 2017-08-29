@@ -9,7 +9,8 @@ import (
 	"github.com/tendermint/tmlibs/merkle"
 	"github.com/tendermint/go-wire"
 	"github.com/bitly/go-simplejson"
-
+	"strconv"
+	"net/http"
 	"fmt"
 	"os/exec"
 	"os"
@@ -25,6 +26,13 @@ type DummyApplication struct {
 const (
 	WriteSet byte = 0x01
 	WriteRem byte = 0x02
+)
+
+//project account 的密码
+const (
+	PathDoc string = "/Users/b/Documents/"
+	pwd string = "1234567890"
+	url string ="http://192.168.1.64:46600/"
 )
 func NewDummyApplication() *DummyApplication {
 	state := iavl.NewIAVLTree(0, nil)
@@ -70,16 +78,16 @@ func (app *DummyApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
 		}
 
 		tree.Set(key, value)
-	//case WriteRem: // Remove
-	//	key, n, err := wire.GetByteSlice(tx)
-	//	if err != nil {
-	//		return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
-	//	}
-	//	tx = tx[n:]
-	//	if len(tx) != 0 {
-	//		return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
-	//	}
-	//	tree.Remove(key)
+		//case WriteRem: // Remove
+		//	key, n, err := wire.GetByteSlice(tx)
+		//	if err != nil {
+		//		return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		//	}
+		//	tx = tx[n:]
+		//	if len(tx) != 0 {
+		//		return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		//	}
+		//	tree.Remove(key)
 	case WriteRem: // Compare
 		key, n, err := wire.GetByteSlice(tx)
 		if err != nil {
@@ -104,7 +112,13 @@ func (app *DummyApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
 			matched := Compare(string(stuValue),string(pojValue))
 			if matched {
 				fmt.Println("matched")
+				filepath := PathDoc+string(pojValue)
+				sendAmount := getIntItem(string(filepath),"amount")
+				//若匹配则发出转账申请
+				toName :="A3AC84A1DB492F2F284BA4CC5DBC933703C7D161"
+				sendBasecoinTx(url,"andlinks",toName,sendAmount)
 				return types.NewResultOK([]byte("Matched"),"log")
+
 			}else{
 				fmt.Println("not matched")
 				return types.OK
@@ -121,10 +135,111 @@ func (app *DummyApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
 	return types.OK
 }
 
+
+func (app *DummyApplication) filterTx(tree merkle.Tree, tx []byte) types.Result {
+	if len(tx) == 0 {
+		return types.ErrEncodingError.SetLog("Tx length cannot be zero")
+	}
+	typeByte := tx[0]
+	tx = tx[1:]
+	switch typeByte {
+	case WriteSet: // Set
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+		value, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
+		}
+		tx = tx[n:]
+		if len(tx) != 0 {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		tree.Set(key, value)
+		//case WriteRem: // Remove
+		//	key, n, err := wire.GetByteSlice(tx)
+		//	if err != nil {
+		//		return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		//	}
+		//	tx = tx[n:]
+		//	if len(tx) != 0 {
+		//		return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		//	}
+		//	tree.Remove(key)
+	case WriteRem: // Compare
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+		value, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Error reading value: %v", err.Error()))
+		}
+		tx = tx[n:]
+		if len(tx) != 0 {
+			return types.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		//获得IPFS地址
+		_, stuValue, stuExists := app.state.Get(value)
+		_, pojValue, pojExists := app.state.Get(key)
+
+		//判断两个地址都存存在
+		if stuExists && pojExists{
+			matched := Compare(string(stuValue),string(pojValue))
+			if matched {
+
+				return types.NewResultOK([]byte("Matched"),"log")
+
+			}else{
+				fmt.Println("not matched")
+				return types.OK
+			}
+		} else {
+			return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Account %X", key))
+
+		}
+
+
+	default:
+		return types.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
+	}
+	return types.OK
+}
+
+
+
+
+//send basecoin transaction to server
+func sendBasecoinTx(url string,from string,to string,amount int) string{
+	//http://192.168.1.64:46600/sendTx?userFrom=andlinks&password=1234567890&money=1000mycoin&userToAddress=A3AC84A1DB492F2F284BA4CC5DBC933703C7D161
+	request := url+"sendTx?userFrom="+from+"&password="+pwd+"&money="+strconv.Itoa(amount)+"mycoin&userToAddress="+to
+	fmt.Println("url, ",request)
+	res, err := http.Get(request)
+	if err != nil{
+		panic(err)
+	}
+	body, err := ioutil.ReadAll(res.Body)
+
+	if string(body) == "true" {
+		fmt.Println("ssuccess")
+		return "success"
+	}else{
+		fmt.Println("error")
+		return "failure"
+	}
+
+
+
+}
 func (app *DummyApplication) CheckTx(tx []byte) types.Result {
 	//return types.OK
 	tree := app.state
-	return app.doTx(tree, tx)
+	return app.filterTx(tree, tx)
 }
 
 func (app *DummyApplication) Commit() types.Result {
