@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os"
 	"io/ioutil"
+	"encoding/hex"
 )
 
 type DummyApplication struct {
@@ -115,8 +116,10 @@ func (app *DummyApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
 				filepath := PathDoc+string(pojValue)
 				sendAmount := getIntItem(string(filepath),"amount")
 				//若匹配则发出转账申请
+				projectname := getProjectName(filepath)
 				//toName :="A3AC84A1DB492F2F284BA4CC5DBC933703C7D161"
-				sendBasecoinTx(url,"andlinks",string(value),sendAmount)
+				sendBasecoinTx(url,projectname,value,sendAmount)
+				//sendBasecoinTx(url,"andlinks",toName,sendAmount)
 				return types.NewResultOK([]byte("Matched"),"log")
 
 			}else{
@@ -188,6 +191,7 @@ func (app *DummyApplication) filterTx(tree merkle.Tree, tx []byte) types.Result 
 		_, stuValue, stuExists := app.state.Get(value)
 		_, pojValue, pojExists := app.state.Get(key)
 
+		fmt.Println("sdudent: ",stuValue," project: ",pojValue)
 		//判断两个地址都存存在
 		if stuExists && pojExists{
 			matched := Compare(string(stuValue),string(pojValue))
@@ -215,9 +219,11 @@ func (app *DummyApplication) filterTx(tree merkle.Tree, tx []byte) types.Result 
 
 
 //send basecoin transaction to server
-func sendBasecoinTx(url string,from string,to string,amount int) string{
+func sendBasecoinTx(url string,from string,to []byte,amount int) string{
 	//http://192.168.1.64:46600/sendTx?userFrom=andlinks&password=1234567890&money=1000mycoin&userToAddress=A3AC84A1DB492F2F284BA4CC5DBC933703C7D161
-	request := url+"sendTx?userFrom="+from+"&password="+pwd+"&money="+strconv.Itoa(amount)+"mycoin&userToAddress="+to
+	result := hex.EncodeToString(to)
+	fmt.Println("send to ",result)
+	request := url+"sendTx?userFrom="+from+"&password="+pwd+"&money="+strconv.Itoa(amount)+"mycoin&userToAddress="+result
 	fmt.Println("url, ",request)
 	res, err := http.Get(request)
 	if err != nil{
@@ -281,6 +287,18 @@ func getIntItem(path string,item string) int{
 	return majorStr
 }
 
+func getProjectName(path string) string{
+
+	dat, err := ioutil.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	//fmt.Print(string(dat))
+	js, err :=simplejson.NewJson([]byte(dat))
+	name := js.Get("name").MustString()
+	fmt.Println("---name---",name)
+	return name
+}
 func getStringItem(path string,item string) string{
 
 	dat, err := ioutil.ReadFile(path)
@@ -309,19 +327,19 @@ func compareFiles(criteria string, target string) bool{
 
 	// 排名在要求之前
 	rankC := getIntItem(criteria,"rank")
-	fmt.Println("rank: ",rankC)
+	fmt.Println("rank C: ",rankC)
 
 	rankS := getIntItem(target,"rank")
-	fmt.Println("rank: ",rankS)
+	fmt.Println("rank S: ",rankS)
 
 	//专业一致
 	majorC := getStringItem(criteria,"major")
-	fmt.Println("major: ",majorC)
+	fmt.Println("major C : ",majorC)
 
 	majorS := getStringItem(target,"major")
-	fmt.Println("major: ",majorS)
+	fmt.Println("major S: ",majorS)
 
-	if rankC>rankS && majorC ==majorS {
+	if rankC>rankS && majorC == majorS {
 		return true
 	}else{
 		return false
@@ -332,11 +350,11 @@ func compareFiles(criteria string, target string) bool{
 
 func Compare(studentAdd string,projectAdd string) bool{
 
-	ipfsDownload(studentAdd,"/Users/b/Documents/")
-	ipfsDownload(projectAdd,"/Users/b/Documents/")
+	ipfsDownload(studentAdd,PathDoc)
+	ipfsDownload(projectAdd,PathDoc)
 
-	filepath2 := "/Users/b/Documents/"+studentAdd
-	filepath := "/Users/b/Documents/"+projectAdd
+	filepath2 := PathDoc+studentAdd
+	filepath := PathDoc+projectAdd
 
 	result := compareFiles(filepath,filepath2)
 	fmt.Println("get result", result)
