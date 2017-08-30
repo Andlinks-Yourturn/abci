@@ -118,9 +118,13 @@ func (app *DummyApplication) doTx(tree merkle.Tree, tx []byte) types.Result {
 				//若匹配则发出转账申请
 				projectname := getProjectName(filepath)
 				//toName :="A3AC84A1DB492F2F284BA4CC5DBC933703C7D161"
-				sendBasecoinTx(url,projectname,value,sendAmount)
+				rel := sendBasecoinTx(url,projectname,value,sendAmount)
 				//sendBasecoinTx(url,"andlinks",toName,sendAmount)
-				return types.NewResultOK([]byte("Matched"),"log")
+				if rel == "success" {
+					return types.NewResultOK([]byte("Matched"), "log")
+				}else{
+					return types.ErrUnauthorized.SetLog("failed to send ")
+				}
 
 			}else{
 				fmt.Println("not matched")
@@ -197,7 +201,7 @@ func (app *DummyApplication) filterTx(tree merkle.Tree, tx []byte) types.Result 
 			matched := Compare(string(stuValue),string(pojValue))
 			if matched {
 
-				return types.NewResultOK([]byte("Matched"),"log")
+				return types.NewResultOK([]byte("Matched"),"success")
 
 			}else{
 				fmt.Println("not matched")
@@ -350,11 +354,11 @@ func compareFiles(criteria string, target string) bool{
 
 func Compare(studentAdd string,projectAdd string) bool{
 
-	ipfsDownload(studentAdd,PathDoc)
-	ipfsDownload(projectAdd,PathDoc)
+	ipfsDownload(studentAdd,"/Users/b/Documents/")
+	ipfsDownload(projectAdd,"/Users/b/Documents/")
 
-	filepath2 := PathDoc+studentAdd
-	filepath := PathDoc+projectAdd
+	filepath2 := "/Users/b/Documents/"+studentAdd
+	filepath := "/Users/b/Documents/"+projectAdd
 
 	result := compareFiles(filepath,filepath2)
 	fmt.Println("get result", result)
