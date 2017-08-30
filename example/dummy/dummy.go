@@ -354,11 +354,11 @@ func compareFiles(criteria string, target string) bool{
 
 func Compare(studentAdd string,projectAdd string) bool{
 
-	ipfsDownload(studentAdd,"/Users/b/Documents/")
-	ipfsDownload(projectAdd,"/Users/b/Documents/")
+	ipfsDownload(studentAdd,PathDoc)
+	ipfsDownload(projectAdd,PathDoc)
 
-	filepath2 := "/Users/b/Documents/"+studentAdd
-	filepath := "/Users/b/Documents/"+projectAdd
+	filepath2 := PathDoc+studentAdd
+	filepath := PathDoc+projectAdd
 
 	result := compareFiles(filepath,filepath2)
 	fmt.Println("get result", result)
